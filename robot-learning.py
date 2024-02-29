@@ -85,6 +85,9 @@ def update(dt):
                 resets_bought += 1
             else:
                 print('Insufficient money to buy a reset.')
+            mode = 'testing'
+            print('Training has finished, moving to testing.')
+            test_init_time = time.time()
         elif action_type == 'demo':
             if money_remaining >= constants.COST_PER_DEMO:
                 demonstration_states, demonstration_actions = environment.get_demonstration()
