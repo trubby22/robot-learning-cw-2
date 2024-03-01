@@ -36,8 +36,9 @@ class Robot:
         self.Q = np.random.rand(constants.WORLD_SIZE ** 2, ACTION_SIZE)
         self.V = np.zeros(constants.WORLD_SIZE ** 2)
         self.policy = np.zeros((constants.WORLD_SIZE ** 2, ACTION_SIZE))
-        self.values = [V]
+        self.values = [self.V]
         self.total_rewards = []
+        self.total_reward = 0
 
         self.returns = [[[] for j in range(ACTION_SIZE)] for i in range(constants.WORLD_SIZE ** 2)]
 
@@ -48,9 +49,12 @@ class Robot:
         self.i = 0
         self.j = 0
 
+        self.next_action = None
+
     def get_next_action_type(self, state, money_remaining):
-        if len(self.next_actions) > 0:
-            res = self.next_actions.pop()
+        if self.next_action is not None:
+            res = self.next_action
+            self.next_action = None
             return res
         else:
             return 'step'
@@ -81,13 +85,23 @@ class Robot:
 
     def process_transition(self, state, action, next_state, money_remaining):
         
-        prv_state = state
-        t, state, reward, done = env.step(act)
-        total_reward += reward
-        Q[prv_state, act] = Q[prv_state, act] + alpha * (reward + GAMMA * max(Q[state, :]) - Q[prv_state, act])
+        reward = self.reward(next_state)
+        in_goal_state = self.reached_goal(self.quantise_space(state))
 
-        if done:
-            break
+        self.total_reward += reward
+        self.Q[state, action] = self.Q[state, action] + alpha * (reward + GAMMA * max(self.Q[next_state, :]) - self.Q[state, action])
+
+        if in_goal_state or self.j == self.max_steps:
+            self.next_action = 'reset'
+            self.total_rewards.append(self.total_reward)
+            self.total_reward = 0
+            V = np.zeros(constants.WORLD_SIZE ** 2)
+            for k in range(constants.WORLD_SIZE ** 2):
+                best_a = np.argmax(self.policy[k, :])
+                V[k] = self.Q[k, best_a]
+
+            self.values.append(V)
+            self.i += 1
 
     def process_demonstration(self, demonstration_states, demonstration_actions, money_remaining):
        pass
@@ -96,22 +110,89 @@ class Robot:
         next_state = state + action
         return next_state
 
-    def reward(self, state):
-        dist_to_goal = Robot.dist(state, self.goal_state)
+    def reward(self, quantised_state):
+        goal = self.quantise_space(self.goal_state)
+        dist_to_goal = self.dist(quantised_state, goal)
         if dist_to_goal < constants.TEST_DISTANCE_THRESHOLD:
             return 100
         else:
             return -dist_to_goal
 
-    def dist(x, y):
+    def dist(self, x, y):
        return np.linalg.norm(x=x-y, ord=2)
 
-    def discretise_space(self, state):
+    def quantise_space(self, state):
         cell_x = int(state[0])
         cell_y = int(state[1])
-        return np.array([cell_x, cell_y])
-
+        return np.array([cell_x, cell_y]).reshape((2, 1))
     
+    def unquantise_space(self, state):
+        return state + 0.5
+    
+    def quantise_action(self, action):
+        action = np.reshape(action, (2,))
+        # 0 - up
+        # 1 - right
+        # 2 - down
+        # 3 - left
+        # angle is relative to ray from origin to position (1, 0), it goes anti-clockwise
+        a = np.arctan2(action[1], action[0])
+        # - np.pi <= a < np.pi
+        a += np.pi
+        # 0 <= a < 2 * np.pi
+        a /= np.pi
+        # 0 <= a < 2
+        a *= 2
+        # 0 <= a < 4
+        res = int(a)
+        if res == 4:
+            res = 3
+        return res
+
+    def unquantise_action(self, quantised_a):
+        actions = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
+        action = actions[quantised_a]
+        action = np.array(action, dtype=np.float32)
+        return action.reshape((2, 1))
+
+    def reached_goal(self, quantised_state):
+       goal = self.quantise_space(self.goal_state)
+       return quantised_state == goal
+    
+    def calc_policy(self):
+        for i in range(constants.WORLD_SIZE ** 2):
+            best_a = np.argmax(self.Q[i, :])
+            self.policy[i, best_a] = 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 class TD_agent(object):
