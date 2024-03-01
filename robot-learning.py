@@ -14,6 +14,11 @@ from environment import Environment
 from robot import Robot
 from graphics import Graphics
 
+from datetime import datetime
+from timeit import default_timer as timer
+
+start = timer()
+
 
 # Set the numpy random seed
 np.random.seed(configuration.RANDOM_SEED)
@@ -109,12 +114,28 @@ def update(dt):
         test_time = time.time() - test_init_time
         if distance <= constants.TEST_DISTANCE_THRESHOLD:
             print(f'The robot reached the goal! Time: {test_time}.')
+            save_screenshot()
+            end = timer()
+            print('time taken')
+            print(end - start)
             pyglet.app.exit()
         if distance < test_best_distance:
             test_best_distance = distance
         if test_time >= constants.TEST_TIMEOUT:
             print(f'The robot did not reach the goal in time. Best distance: {test_best_distance}.')
+            end = timer()
+            print('time taken')
+            print(end - start)
+            save_screenshot()
             pyglet.app.exit()
+
+
+def save_screenshot():
+    buffer = pyglet.image.get_buffer_manager().get_color_buffer()
+    image_data = buffer.get_image_data()
+    date_time = datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    image_data.save(fr'pyglet-{date_time}.png')
+    print('taking screenshot...')
 
 
 # Function that is called at a regular interval to draw the environment and visualisation on the window

@@ -123,7 +123,7 @@ def epsilon_greedy(epsilon:float, dqn:DQN, state:torch.Tensor)->int:
     num_actions = q_values.shape[0]
     greedy_act = int(torch.argmax(q_values))
     p = float(torch.rand(1))
-    if p>epsilon:
+    if p < 1 - epsilon + epsilon / num_actions:
         return greedy_act
     else:
         return int(_rng.integers(0, num_actions - 1))
@@ -168,7 +168,7 @@ class Robot:
         self.goal_state = goal_state
         self.paths_to_draw = []
 
-        self.memory = ReplayBuffer(1_000)
+        self.memory = ReplayBuffer(500)
         layers = [2, 50, 4]
         self.policy_net = DQN([x for x in layers])
         self.target_net = DQN([x for x in layers])
@@ -180,26 +180,37 @@ class Robot:
         self.loc_ix = 0
         self.glob_ix = 0
 
+        # epsilon = 1.0 --> fully random
+        # epsilon = 0.0 --> fully greedy
         self.epsilon_start = 1.0
-        self.epsilon_end = 0.25
-        # self.epsilon_test = 0.1
+        self.epsilon_end = 0.134
         self.epsilon_diff = self.epsilon_end - self.epsilon_start
-        self.epsilon_min = 1_000
-        self.epsilon_max = 5_000
+        self.epsilon_min = 600
+        self.epsilon_max = 800
 
-        self.num_episodes = 10
-        self.max_episode = 1_000
+        self.epsilon_schedule = [1.0, 0.8, 0.666, 0.4]
+        # should have 0.5 probability of best action
+        # self.terminal_epsilon = 0.668
+        self.terminal_epsilon = 0.25
 
-        self.batch_size = 8
+        self.max_episode = 200
 
-        self.next_action = 'demo'
+        self.batch_size = 32
+
+        self.next_actions = ['demo', 'demo']
+        self.max_dist = int(np.sqrt(2)) * 100
+
+        self.cur_path = []
+        self.cur_speed = None
+        self.demo = False
+        self.distances = []
+        self.visits = np.zeros(shape=(100, 100))
 
     def get_next_action_type(self, state, money_remaining):
         # TODO: This informs robot-learning.py what type of operation to perform
         # It should return either 'demo', 'reset', or 'step'
-        if self.next_action is not None:
-            res = self.next_action
-            self.next_action = None
+        if len(self.next_actions) > 0:
+            res = self.next_actions.pop()
             return res
         else:
             return 'step'
@@ -207,30 +218,40 @@ class Robot:
     def get_next_action_training(self, state, money_remaining):
         # TODO: This returns an action to robot-learning.py, when get_next_action_type() returns 'step'
         # Currently just a random action is returned
+        self.adjust_speed(state)
+
         epsilon = self.calc_epsilon()
         state = torch.from_numpy(state).reshape(-1).float()
         quantised_action = epsilon_greedy(epsilon, self.policy_net, state)
-        return Robot.unquantise_action(quantised_action)
+        res = self.unquantise_action(quantised_action)
+        return res
 
     def get_next_action_testing(self, state):
         # TODO: This returns an action to robot-learning.py, when get_next_action_type() returns 'step'
         # Currently just a random action is returned
-        epsilon = self.epsilon_test
+        self.adjust_speed(state)
+
         state = torch.from_numpy(state).reshape(-1).float()
         quantised_action = greedy_action(self.policy_net, state)
-        return Robot.unquantise_action(quantised_action)
+        res = self.unquantise_action(quantised_action)
+        return res
 
     # Function that processes a transition
-    def process_transition(self, state, action, next_state, money_remaining):
+    def process_transition(self, _state, action, next_state, money_remaining):
         # TODO: This allows you to process or store a transition that the robot has experienced in the environment
         # Currently, nothing happens
+        self.adjust_speed(_state)
 
-        reward = self.reward(next_state)
+        if self.glob_ix % self.max_episode == 5:
+            epsilon = self.calc_epsilon()
+            print('glob_ix', self.glob_ix, 'epsilon', epsilon, 'speed', self.cur_speed, 'money', money_remaining)
+
+        reward = self.reward(_state, next_state)
         done = self.reached_goal(next_state)
 
         reward = torch.tensor([reward])
 
-        state = torch.from_numpy(state).reshape(-1).float()
+        state = torch.from_numpy(_state).reshape(-1).float()
         next_state = torch.from_numpy(next_state).reshape(-1).float()
 
         action = Robot.quantise_action(action)
@@ -239,7 +260,7 @@ class Robot:
         self.memory.push([state, action, next_state, reward, torch.tensor([done])])
 
         # Perform one step of the optimization (on the policy network)
-        if len(self.memory.buffer) > self.batch_size:
+        if self.memory.size >= self.batch_size:
             transitions = self.memory.sample(self.batch_size)
             state_batch, action_batch, nextstate_batch, reward_batch, dones = (torch.stack(x) for x in zip(*transitions))
             # Compute loss
@@ -250,28 +271,56 @@ class Robot:
             mse_loss.backward()
             self.optimizer.step()
 
+        dist = self.dist_to_goal(_state)
+        self.distances.append(dist)
+        self.cur_path.append(state)
         self.loc_ix += 1
-        if done or self.loc_ix >= self.max_episode:
+        if done or (not self.demo and self.loc_ix >= self.max_episode):
+            path = np.array(self.cur_path)
+            path_to_draw = PathToDraw(path=path, colour=[255, 255, 255], width=1)
+            self.paths_to_draw.append(path_to_draw)
+            self.cur_path = []
+            print('episode min distance', min(self.distances))
+            self.distances = []
             self.episode_durations.append(self.loc_ix)
             self.loc_ix = 0
-            self.next_action = 'reset'
+            self.next_actions.append('reset')
             update_target(self.target_net, self.policy_net)
+            print('episode done', 'money', money_remaining)
         self.glob_ix += 1
+        self.visits[int(state[0]), int(state[1])] += 1
+        if self.glob_ix % 100:
+            update_target(self.target_net, self.policy_net)
+            print(self.get_reward_matrix())
 
     # Function that takes in the list of states and actions for a demonstration
     def process_demonstration(self, demonstration_states, demonstration_actions, money_remaining):
         # TODO: This allows you to process or store a demonstration that the robot has received
         # Currently, nothing happens
-        path_to_draw = PathToDraw(path=demonstration_states, colour=[0, 0, 255], width=1)
+        path_to_draw = PathToDraw(path=demonstration_states, colour=[0, 0, 255], width=2)
         self.paths_to_draw.append(path_to_draw)
         n = demonstration_states.shape[0]
+        self.demo = True
         for i in range(n - 1):
             state = demonstration_states[i]
             action = demonstration_actions[i]
             next_state = demonstration_states[i + 1]
             self.process_transition(state, action, next_state, money_remaining)
         
+        self.glob_ix -= constants.DEMOS_CEM_PATH_LENGTH
+        self.demo = False
+
+        print('demo has been processed')
         update_target(self.target_net, self.policy_net)
+    
+    def predict_reward(self, state: np.ndarray):
+        with torch.no_grad():
+            self.policy_net.eval()
+            x = torch.from_numpy(state).reshape(-1).float()
+            q_vals = self.policy_net(x)
+            max_q_val = float(max(q_vals))
+            self.policy_net.train()
+        return max_q_val
 
     def dynamics_model(self, state, action):
         # TODO: This is the learned dynamics model, which is currently called by graphics.py when visualising the model
@@ -279,20 +328,31 @@ class Robot:
         next_state = state + action
         return next_state
 
-    def reward(self, state: np.ndarray):
-        state = torch.from_numpy(state).float()
-        goal_state = torch.from_numpy(self.goal_state).float()
-        dist = LA.vector_norm(state - goal_state)
-        res = dist
+    def reward(self, prev_state: np.ndarray, state: np.ndarray):
+        dist = self.dist_to_goal(state)
+        speed = Robot.dist(prev_state, state)
+        speed /= self.cur_speed
+        speed *= 10
+        res = -dist
+        novelty_term = 10 / (self.visits[int(state[0]), int(state[1])] + 1)
+        res += novelty_term
+        res += speed
         if dist < constants.TEST_DISTANCE_THRESHOLD:
             res += 1_000
         return res
 
     def reached_goal(self, state: np.ndarray):
-        state = torch.from_numpy(state).float()
-        goal_state = torch.from_numpy(self.goal_state).float()
-        dist = LA.vector_norm(state - goal_state)
+        dist = self.dist_to_goal(state)
         return dist < constants.TEST_DISTANCE_THRESHOLD
+
+    def dist_to_goal(self, state):
+        return Robot.dist(state, self.goal_state)
+
+    def dist(x, y):
+        x = torch.from_numpy(x).float()
+        y = torch.from_numpy(y).float()
+        dist = LA.vector_norm(x - y)
+        return dist
 
     def quantise_action(action):
         action = np.reshape(action, (2,))
@@ -314,18 +374,45 @@ class Robot:
             res = 3
         return res
 
-    def unquantise_action(quantised_a):
+    def unquantise_action(self, quantised_a):
         actions = [[-1, -1], [1, -1], [1, 1], [-1, 1]]
         action = actions[quantised_a]
-        action = np.array(action)
-        action *= constants.ROBOT_MAX_ACTION
+        action = np.array(action, dtype=np.float32)
+        action *= self.cur_speed
         return action.reshape((2, 1))
 
+    def adjust_speed(self, state):
+        dist = self.dist_to_goal(state)
+        if dist > 20:
+            self.cur_speed = 1
+        else:
+            self.cur_speed = max(0.1, dist / 20)
+
     def calc_epsilon(self):
+        episode_ix = self.glob_ix // self.max_episode
+        if episode_ix < 0:
+            return self.terminal_epsilon
+        if episode_ix < len(self.epsilon_schedule):
+            return self.epsilon_schedule[episode_ix]
+        else:
+            return self.terminal_epsilon
+        
         if self.glob_ix < self.epsilon_min:
             epsilon = self.epsilon_start
         elif self.glob_ix < self.epsilon_max:
-            epsilon = self.epsilon_start + (self.glob_ix - self.epsilon_min + 1) / (self.num_episodes - self.epsilon_min) * self.epsilon_diff
+            epsilon = self.epsilon_start + (self.glob_ix - self.epsilon_min + 1) / (self.epsilon_max - self.epsilon_min) * self.epsilon_diff
         else:
             epsilon = self.epsilon_end
         return epsilon
+
+    def get_reward_matrix(self):
+        xs = np.linspace(0.0, 100.0, num=10)
+        ys = np.linspace(0.0, 100.0, num=10)
+        res = np.zeros(shape=(10, 10))
+        for i in range(len(xs)):
+            for j in range(len(ys)):
+                state = np.array([xs[i], ys[j]]).reshape((2, 1))
+                reward = self.predict_reward(state)
+                res[i, j] = reward
+        
+        return res
