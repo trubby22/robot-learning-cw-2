@@ -188,16 +188,16 @@ class Robot:
         self.epsilon_min = 600
         self.epsilon_max = 800
 
-        self.epsilon_schedule = [1.0, 0.8, 0.666, 0.4]
+        self.epsilon_schedule = [0.666, 0.4]
         # should have 0.5 probability of best action
         # self.terminal_epsilon = 0.668
         self.terminal_epsilon = 0.25
 
-        self.max_episode = 200
+        self.max_episode = 250
 
         self.batch_size = 32
 
-        self.next_actions = ['demo', 'demo']
+        self.next_actions = ['demo', 'demo', 'demo']
         self.max_dist = int(np.sqrt(2)) * 100
 
         self.cur_path = []
@@ -289,9 +289,9 @@ class Robot:
             print('episode done', 'money', money_remaining)
         self.glob_ix += 1
         self.visits[int(state[0]), int(state[1])] += 1
-        if self.glob_ix % 100:
+        if self.glob_ix % 10 == 0:
             update_target(self.target_net, self.policy_net)
-            print(self.get_reward_matrix())
+            print('mean reward', self.get_reward_matrix().mean())
 
     # Function that takes in the list of states and actions for a demonstration
     def process_demonstration(self, demonstration_states, demonstration_actions, money_remaining):
@@ -330,15 +330,15 @@ class Robot:
 
     def reward(self, prev_state: np.ndarray, state: np.ndarray):
         dist = self.dist_to_goal(state)
-        speed = Robot.dist(prev_state, state)
-        speed /= self.cur_speed
-        speed *= 10
-        res = -dist
-        novelty_term = 10 / (self.visits[int(state[0]), int(state[1])] + 1)
-        res += novelty_term
-        res += speed
+        # speed = Robot.dist(prev_state, state)
+        # speed /= self.cur_speed
+        # speed *= 10
+        res = - dist / self.max_dist
+        # novelty_term = 1 / (self.visits[int(state[0]), int(state[1])] + 1)
+        # res += novelty_term
+        # res += speed
         if dist < constants.TEST_DISTANCE_THRESHOLD:
-            res += 1_000
+            res += 1
         return res
 
     def reached_goal(self, state: np.ndarray):
@@ -384,7 +384,7 @@ class Robot:
     def adjust_speed(self, state):
         dist = self.dist_to_goal(state)
         if dist > 20:
-            self.cur_speed = 1
+            self.cur_speed = constants.ROBOT_MAX_ACTION
         else:
             self.cur_speed = max(0.1, dist / 20)
 
