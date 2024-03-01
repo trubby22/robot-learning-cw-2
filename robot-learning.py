@@ -86,6 +86,10 @@ def update(dt):
             else:
                 print('Insufficient money to buy a reset.')
         elif action_type == 'demo':
+            state = environment.reset()
+            mode = 'testing'
+            print('Training has finished, moving to testing.')
+
             if money_remaining >= constants.COST_PER_DEMO:
                 demonstration_states, demonstration_actions = environment.get_demonstration()
                 robot.process_demonstration(demonstration_states, demonstration_actions, money_remaining)
