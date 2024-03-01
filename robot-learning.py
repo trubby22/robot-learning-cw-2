@@ -14,6 +14,11 @@ from environment import Environment
 from robot import Robot
 from graphics import Graphics
 
+from datetime import datetime
+from timeit import default_timer as timer
+
+start = timer()
+
 
 # Set the numpy random seed
 np.random.seed(configuration.RANDOM_SEED)
@@ -39,6 +44,16 @@ test_best_distance = np.inf
 penalty = False
 # Start the training timer
 train_init_time = time.time()
+
+def save_screenshot():
+    buffer = pyglet.image.get_buffer_manager().get_color_buffer()
+    image_data = buffer.get_image_data()
+    date_time = datetime.now().strftime("%m-%d-%Y-%H-%M-%S")
+    image_data.save(fr'pyglet-{date_time}.png')
+    print('taking screenshot...')
+    end = timer()
+    print('time taken')
+    print(end - start)
 
 
 # Function to calculate how much money is left
@@ -112,11 +127,13 @@ def update(dt):
         state = next_state
         test_time = time.time() - test_init_time
         if distance <= constants.TEST_DISTANCE_THRESHOLD:
+            save_screenshot()
             print(f'The robot reached the goal! Time: {test_time}.')
             pyglet.app.exit()
         if distance < test_best_distance:
             test_best_distance = distance
         if test_time >= constants.TEST_TIMEOUT:
+            save_screenshot()
             print(f'The robot did not reach the goal in time. Best distance: {test_best_distance}.')
             pyglet.app.exit()
 

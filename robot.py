@@ -68,6 +68,8 @@ class Robot:
     def get_next_action_testing(self, state):
         # TODO: This returns an action to robot-learning.py, when get_next_action_type() returns 'step'
         # Currently just a random action is returned
+        if self.p == self.planned_actions.shape[0]:
+            return state
         res = self.planned_actions[self.p]
         self.p += 1
         return res
