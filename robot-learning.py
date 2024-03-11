@@ -19,6 +19,8 @@ from timeit import default_timer as timer
 
 start = timer()
 
+early_test = False
+
 
 # Set the numpy random seed
 np.random.seed(configuration.RANDOM_SEED)
@@ -90,6 +92,11 @@ def update(dt):
                 resets_bought += 1
             else:
                 print('Insufficient money to buy a reset.')
+                if early_test:
+                    state = environment.reset()
+                    mode = 'testing'
+                    print('Training has finished, moving to testing.')
+                    test_init_time = time.time()
         elif action_type == 'demo':
             if money_remaining >= constants.COST_PER_DEMO:
                 demonstration_states, demonstration_actions = environment.get_demonstration()
@@ -97,6 +104,11 @@ def update(dt):
                 demos_bought += 1
             else:
                 print('Insufficient money to buy a demo.')
+                if early_test:
+                    state = environment.reset()
+                    mode = 'testing'
+                    print('Training has finished, moving to testing.')
+                    test_init_time = time.time()
         elif action_type == 'step':
             if money_remaining >= constants.COST_PER_STEP:
                 action = robot.get_next_action_training(state, money_remaining)
@@ -104,6 +116,11 @@ def update(dt):
                 robot.process_transition(state, action, next_state, money_remaining)
                 state = next_state
                 steps_bought += 1
+        elif action_type == 'test':
+            state = environment.reset()
+            mode = 'testing'
+            print('Training has finished, moving to testing.')
+            test_init_time = time.time()
         else:
             raise ValueError(f'Invalid value for action_type: {action_type}')
     elif mode == 'testing':

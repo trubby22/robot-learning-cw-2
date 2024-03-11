@@ -169,7 +169,7 @@ class Robot:
         self.paths_to_draw = []
 
         self.memory = ReplayBuffer(500)
-        layers = [2, 50, 4]
+        layers = [2, 20, 20, 4]
         self.policy_net = DQN([x for x in layers])
         self.target_net = DQN([x for x in layers])
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=1e-2)
@@ -187,6 +187,7 @@ class Robot:
         self.epsilon_diff = self.epsilon_end - self.epsilon_start
         self.epsilon_min = 600
         self.epsilon_max = 800
+        self.epsilon_test = 0.5
 
         self.epsilon_schedule = [0.666, 0.4]
         # should have 0.5 probability of best action
@@ -232,7 +233,7 @@ class Robot:
         self.adjust_speed(state)
 
         state = torch.from_numpy(state).reshape(-1).float()
-        quantised_action = greedy_action(self.policy_net, state)
+        quantised_action = epsilon_greedy(self.epsilon_test, self.policy_net, state)
         res = self.unquantise_action(quantised_action)
         return res
 
@@ -244,7 +245,7 @@ class Robot:
 
         if self.glob_ix % self.max_episode == 5:
             epsilon = self.calc_epsilon()
-            print('glob_ix', self.glob_ix, 'epsilon', epsilon, 'speed', self.cur_speed, 'money', money_remaining)
+            # print('glob_ix', self.glob_ix, 'epsilon', epsilon, 'speed', self.cur_speed, 'money', money_remaining)
 
         reward = self.reward(_state, next_state)
         done = self.reached_goal(next_state)
@@ -280,18 +281,18 @@ class Robot:
             path_to_draw = PathToDraw(path=path, colour=[255, 255, 255], width=1)
             self.paths_to_draw.append(path_to_draw)
             self.cur_path = []
-            print('episode min distance', min(self.distances))
+            # print('episode min distance', min(self.distances))
             self.distances = []
             self.episode_durations.append(self.loc_ix)
             self.loc_ix = 0
             self.next_actions.append('reset')
             update_target(self.target_net, self.policy_net)
-            print('episode done', 'money', money_remaining)
+            # print('episode done', 'money', money_remaining)
         self.glob_ix += 1
         self.visits[int(state[0]), int(state[1])] += 1
         if self.glob_ix % 10 == 0:
             update_target(self.target_net, self.policy_net)
-            print('mean reward', self.get_reward_matrix().mean())
+            # print('mean reward', self.get_reward_matrix().mean())
 
     # Function that takes in the list of states and actions for a demonstration
     def process_demonstration(self, demonstration_states, demonstration_actions, money_remaining):
@@ -310,7 +311,7 @@ class Robot:
         self.glob_ix -= constants.DEMOS_CEM_PATH_LENGTH
         self.demo = False
 
-        print('demo has been processed')
+        # print('demo has been processed')
         update_target(self.target_net, self.policy_net)
     
     def predict_reward(self, state: np.ndarray):
